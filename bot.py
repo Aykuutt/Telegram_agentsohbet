@@ -23,7 +23,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         # Gemini modeline soruyu yönelt
         response = ai_client.models.generate_content(
-            model='gemini-2.5-flash',
+            model = "gemini-3.8-flash",
             contents=user_text,
         )
         reply = response.text or "Bir yanıt oluşturamadım."
