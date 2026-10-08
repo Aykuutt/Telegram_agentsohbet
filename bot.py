@@ -4,41 +4,53 @@ from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters
 from google import genai
 
-# Çevre değişkenlerinden anahtarları çek
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 
-# Gemini istemcisini başlat
-ai_client = genai.Client(api_key=GEMINI_API_KEY)
+if not GEMINI_API_KEY:
+    print("UYARI: GEMINI_API_KEY eksik!")
+    ai_client = None
+else:
+    ai_client = genai.Client(api_key=GEMINI_API_KEY)
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Selam! Ben senin yapay zeka asistanınım. İstediğin her şeyi sorabilirsin!")
+    await update.message.reply_text("Selam! Ben yapay zeka asistanınım. İstediğin her şeyi sorabilirsin!")
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not ai_client:
+        await update.message.reply_text("Hata: GEMINI_API_KEY tanımlanmamış.")
+        return
+
     user_text = update.message.text
-    
-    # Kullanıcıya yazıyor simgesi göster
     await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
     
-    try:
-        # Gemini modeline soruyu yönelt
-        response = ai_client.models.generate_content(
-            model = 'gemini-3.8-flash' ,
-            contents=user_text,
-        )
-        reply = response.text or "Bir yanıt oluşturamadım."
-    except Exception as e:
-        reply = f"Hata oluştu: {str(e)}"
-        
+    # Sırasıyla güncel modelleri dener
+    models_to_try = ['gemini-3.8-flash', 'gemini-2.5-flash', 'gemini-1.5-flash']
+    reply = None
+
+    for model_name in models_to_try:
+        try:
+            response = ai_client.models.generate_content(
+                model=model_name,
+                contents=user_text,
+            )
+            if response and response.text:
+                reply = response.text
+                break
+        except Exception:
+            continue
+
+    if not reply:
+        reply = "Cevap üretilirken bir sorun oluştu, lütfen tekrar dener misin?"
+
     await update.message.reply_text(reply)
 
 def main():
-    if not TELEGRAM_BOT_TOKEN or not GEMINI_API_KEY:
-        print("HATA: TELEGRAM_BOT_TOKEN veya GEMINI_API_KEY eksik!")
+    if not TELEGRAM_BOT_TOKEN:
+        print("HATA: TELEGRAM_BOT_TOKEN eksik!")
         return
 
     app = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).build()
-    
     app.add_handler(CommandHandler("start", start))
     app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_message))
     
