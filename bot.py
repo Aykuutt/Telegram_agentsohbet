@@ -1,49 +1,94 @@
 import os
 import asyncio
+import requests
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters
 from google import genai
 
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
+GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN")
+GITHUB_REPO = os.environ.get("GITHUB_REPO") # Ornek format: "kullaniciadi/reponame"
 
 if not GEMINI_API_KEY:
-    print("UYARI: GEMINI_API_KEY eksik!")
     ai_client = None
 else:
     ai_client = genai.Client(api_key=GEMINI_API_KEY)
 
+def get_github_issues():
+    if not GITHUB_TOKEN or not GITHUB_REPO:
+        return "GitHub ayarları (GITHUB_TOKEN veya GITHUB_REPO) Railway'de tanımlanmamış."
+    
+    url = f"https://api.github.com/repos/{GITHUB_REPO}/issues?state=open"
+    headers = {
+        "Authorization": f"token {GITHUB_TOKEN}",
+        "Accept": "application/vnd.github.v3+json"
+    }
+    try:
+        res = requests.get(url, headers=headers, timeout=5)
+        if res.status_code == 200:
+            issues = res.json()
+            # PR'lar da issue sayıldığı için onları filtreleyelim
+            pure_issues = [i for i in issues if "pull_request" not in i]
+            if not pure_issues:
+                return f"✅ {GITHUB_REPO} reposunda şu an açık bir issue (sorun bildirimi) yok!"
+            
+            text = f"📌 **{GITHUB_REPO} Açık Issue Listesi ({len(pure_issues)} Adet):**\n\n"
+            for issue in pure_issues[:5]:
+                text += f"• #{issue['number']}: {issue['title']}\n🔗 {issue['html_url']}\n\n"
+            return text
+        else:
+            return f"GitHub verisi alınamadı (Hata Kodu: {res.status_code})"
+    except Exception as e:
+        return f"GitHub bağlantı hatası: {str(e)}"
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Selam! Ben senin 7/24 AI asistanınım, hazırım!")
+    await update.message.reply_text(
+        "Selam! Ben senin 7/24 AI asistanınım.\n\n"
+        "• Bana doğrudan her şeyi sorabilirsin.\n"
+        "• Açık issue'ları görmek için /issues yazabilir veya 'issue var mı' diye sorabilirsin."
+    )
+
+async def issues_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
+    reply = get_github_issues()
+    await update.message.reply_text(reply)
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_text = update.message.text.strip().lower()
+    
+    # Kullanıcı issue sorguluyorsa doğrudan GitHub API'ye sor
+    if "issue" in user_text:
+        await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
+        reply = get_github_issues()
+        await update.message.reply_text(reply)
+        return
+
+    # Normal yapay zeka sohbeti
     if not ai_client:
         await update.message.reply_text("Hata: GEMINI_API_KEY tanımlanmamış.")
         return
 
-    user_text = update.message.text
     await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
     
-    # 503 yoğunluk durumunda sırayla alternatif modellere geçer
-    models_to_try = ['gemini-3.8-flash', 'gemini-2.5-flash', 'gemini-1.5-flash']
+    # Hızlı ve kararlı fallback modelleri
+    models = ['gemini-2.5-flash', 'gemini-1.5-flash', 'gemini-3.8-flash']
     reply = None
-    last_error = None
 
-    for model_name in models_to_try:
+    for model_name in models:
         try:
             response = ai_client.models.generate_content(
                 model=model_name,
-                contents=user_text,
+                contents=update.message.text,
             )
             if response and response.text:
                 reply = response.text
                 break
-        except Exception as e:
-            last_error = str(e)
+        except Exception:
             continue
 
     if not reply:
-        reply = f"Sunucu yoğunluğu nedeniyle yanıt alınamadı. Lütfen birkaç saniye sonra tekrar dene. ({last_error})"
+        reply = "Sunucularda anlık bir yoğunluk var, yanıt üretilemedi. Lütfen birkaç saniye sonra tekrar yazar mısın?"
 
     await update.message.reply_text(reply)
 
@@ -54,6 +99,7 @@ def main():
 
     app = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).build()
     app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("issues", issues_command))
     app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_message))
     
     print("Bot 7/24 dinlemeye basladi...")
