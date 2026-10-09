@@ -55,43 +55,48 @@ async def issues_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(reply)
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_text = update.message.text.strip().lower()
+    user_text = update.message.text.strip()
     
-    # Kullanıcı issue sorguluyorsa doğrudan GitHub API'ye sor
-    if "issue" in user_text:
+    # Kullanıcı issue sorguluyorsa GitHub API'ye sor
+    if "issue" in user_text.lower():
         await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
         reply = get_github_issues()
         await update.message.reply_text(reply)
         return
 
-    # Normal yapay zeka sohbeti
     if not ai_client:
         await update.message.reply_text("Hata: GEMINI_API_KEY tanımlanmamış.")
         return
 
     await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
     
-    # Hızlı ve kararlı fallback modelleri
-    models = ['gemini-2.5-flash', 'gemini-1.5-flash', 'gemini-3.8-flash']
+    # Sadece çalışan ve desteklenen güncel modeller
+    models = ['gemini-2.5-flash', 'gemini-2.5-flash-lite']
     reply = None
 
     for model_name in models:
-        try:
-            response = ai_client.models.generate_content(
-                model=model_name,
-                contents=update.message.text,
-            )
-            if response and response.text:
-                reply = response.text
+        for attempt in range(2): # 503 yerse 1 saniye bekleyip aynı modelde 1 şans daha verir
+            try:
+                response = ai_client.models.generate_content(
+                    model=model_name,
+                    contents=user_text,
+                )
+                if response and response.text:
+                    reply = response.text
+                    break
+            except Exception as e:
+                err_str = str(e)
+                if "503" in err_str:
+                    await asyncio.sleep(1)
+                    continue
                 break
-        except Exception:
-            continue
+        if reply:
+            break
 
     if not reply:
-        reply = "Sunucularda anlık bir yoğunluk var, yanıt üretilemedi. Lütfen birkaç saniye sonra tekrar yazar mısın?"
+        reply = "Şu an Google API tarafında anlık bir yoğunluk var, 5 saniye sonra tekrar sorabilir misin?"
 
     await update.message.reply_text(reply)
-
 def main():
     if not TELEGRAM_BOT_TOKEN:
         print("HATA: TELEGRAM_BOT_TOKEN eksik!")
