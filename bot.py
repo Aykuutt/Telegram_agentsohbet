@@ -13,7 +13,7 @@ if not GEMINI_API_KEY:
 else:
     ai_client = genai.Client(api_key=GEMINI_API_KEY)
 
-async def start(update: Update, context: Update):
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Selam! Ben senin 7/24 AI asistanınım, hazırım!")
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -24,15 +24,15 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_text = update.message.text
     await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
     
+    # Güncel Gemini model çağrısı
     try:
-        # Doğrudan güncel model çağrısı
         response = ai_client.models.generate_content(
-            model='gemini-2.5-flash',
+            model='gemini-3.8-flash',
             contents=user_text,
         )
         reply = response.text or "Yanıt üretilemedi."
     except Exception as e:
-        reply = f"[SÜRÜM V2 HATASI]: {str(e)}"
+        reply = f"Hata oluştu: {str(e)}"
         
     await update.message.reply_text(reply)
 
